@@ -162,7 +162,7 @@ class ServerRobot():
       self.clear_bomb()
         
       dist = range
-      rtheta = dir / 57.3
+      rtheta = math.radians(dir)
       self.xt = self.x + dist * math.cos(rtheta)
       self.yt = self.y + dist * math.sin(rtheta)
       self.tick1 = self.arena.line(self.xt-10, self.yt, self.xt+10, self.yt, fill=colors[self.index-1])
@@ -341,8 +341,8 @@ class ServerRobot():
       self.dir = (self.dir + delta) % 360
       #print("dir: ", self.dir)
       self.dirdelta = self.dirdelta - delta
-      self.deltax = self.currentSpeedMPS * math.cos(self.dir / 57.3) / QUANTA
-      self.deltay = self.currentSpeedMPS * math.sin(self.dir / 57.3) / QUANTA
+      self.deltax = self.currentSpeedMPS * math.cos(math.radians(self.dir)) / QUANTA
+      self.deltay = self.currentSpeedMPS * math.sin(math.radians(self.dir)) / QUANTA
 
     # barrel cooling
     self.bHeat = self.bHeat - (2 / QUANTA)
@@ -371,8 +371,8 @@ class ServerRobot():
     if self.cooling:
       self.currentSpeedMPS = min(self.maxSpeedMPS * .35, self.currentSpeedMPS)
       self.speedGoalMPS = min(self.maxSpeedMPS * .35, self.speedGoalMPS)
-      self.deltax = self.currentSpeedMPS * math.cos(self.dir / 57.3) / QUANTA
-      self.deltay = self.currentSpeedMPS * math.sin(self.dir / 57.3) / QUANTA
+      self.deltax = self.currentSpeedMPS * math.cos(math.radians(self.dir)) / QUANTA
+      self.deltay = self.currentSpeedMPS * math.sin(math.radians(self.dir)) / QUANTA
       if self.mHeat <= 180:
         self.cooling = False
 
@@ -388,11 +388,10 @@ class ServerRobot():
         delta = (-10 / QUANTA)
       self.currentSpeedMPS = self.currentSpeedMPS + delta
       # calculate per tick movement
-      self.deltax = self.currentSpeedMPS * math.cos(self.dir / 57.3) / QUANTA
-      self.deltay = self.currentSpeedMPS * math.sin(self.dir / 57.3) / QUANTA
-      #print("Speed: ", self.currentSpeedMPS, "Direction: ", self.dir, "Coasting: ", self.coasting, "Braking: ", self.braking)
+      self.deltax = self.currentSpeedMPS * math.cos(math.radians(self.dir)) / QUANTA
+      self.deltay = self.currentSpeedMPS * math.sin(math.radians(self.dir)) / QUANTA
 
-    # Move the puppy
+    # Move the puppy. If we hit the wall, need to inflict damage and move away from wall
     newx = self.x + self.deltax
     if newx > 999 or newx < 0:
       self.currentSpeedMPS = 0
@@ -482,38 +481,39 @@ class ServerRobot():
 
     self.sdir = dir
     self.sres = res
-    theta1 = (self.sdir - self.sres)
-    if theta1 < 0:
-      theta1 += 360
-    theta2 = (self.sdir + self.sres)
-    #print("dir", dir, "t1", theta1, "t2", theta2)
-    endx = (1500 * math.cos(theta1 / 57.3)) + self.x
-    endy = (1500 * math.sin(theta1 / 57.3)) + self.y
-    #print("bot:", int(self.x), int(self.y), int(endx), int(endy))
-    #print(self.x, self.y, endx, endy) 
-    #pygame.draw.line(self.arena, (0, 0, 0), (self.x,1000-self.y), (endx,1000-endy))
+    thetaRight = (self.sdir + 360 - self.sres) % 360
+    thetaLeft = (self.sdir + self.sres) % 360
+
+    endx = (1500 * math.cos(math.radians(thetaRight))) + self.x
+    endy = (1500 * math.sin(math.radians(thetaRight))) + self.y
+
     self.scanLine1 = self.arena.line(self.x, self.y, endx, endy, fill=colors[self.index-1])
-    #print (type(self.scanLine1))
-    endx = (1500 * math.cos(theta2 / 57.3)) + self.x
-    endy = (1500 * math.sin(theta2 / 57.3)) + self.y  
-    #pygame.draw.line(self.arena, (0, 0, 0), (self.x,1000-self.y), (endx,1000-endy))
+
+    endx = (1500 * math.cos(math.radians(thetaLeft))) + self.x
+    endy = (1500 * math.sin(math.radians(thetaLeft))) + self.y  
+
     self.scanLine2 = self.arena.line(self.x, self.y, endx, endy, fill=colors[self.index-1])
     self.scantime = time.time()
-    # See if we saw anyone
-
+    
+    # See if we saw anyone, get ID of closest if more than one
     dist = 2000
     closest = 0
     for r in self.robots:
 
       if r.status == "A" and r.index != self.index:
 
-        rtheta = math.atan2((r.y - self.y), (r.x - self.x))
+        thetaEnemy = (math.degrees(math.atan2((r.y - self.y), (r.x - self.x))) + 360) % 360
 
-        if rtheta < 0:
-          rtheta += (2 * math.pi)
-        rtheta = rtheta * 57.3
+        pingable = False
 
-        if rtheta > theta1 and rtheta < theta2:
+        # Does the scan cross 0 degrees? ThetaLeft will be less than thetaRight
+        if thetaLeft < thetaRight:
+          # scan includes 0 degrees. Add 360 to any angle less than 20
+          thetaLeft += 360
+          if thetaEnemy < 20:
+            thetaEnemy += 360
+        # Is enemy within scan boundaries?
+        if thetaRight < thetaEnemy < thetaLeft:
           myDist = math.sqrt((r.y - self.y)**2 + (r.x - self.x)**2)
           if myDist < dist:
             dist = myDist
@@ -531,14 +531,12 @@ class ServerRobot():
 
     if dist > 0:
       dist += random.randint(-5 * self.sres, 5 * self.sres)
-      #print (dist)
       # Barrel heat
       if random.randint(0,1):
         dist += self.bHeat
       else:
         dist -= self.bHeat
 
-    #print("Dist, bheat", dist, self.bHeat)
     if self.autoscan == False:
       reply = "%d;scan;%d;%d" % (self.index, dist, closest)
       self.send_message(reply)
